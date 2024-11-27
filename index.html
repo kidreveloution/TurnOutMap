@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Election Turnout Trends</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+        }
+        #title {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            background-color: white;
+            padding: 10px;
+            font-size: 24px;
+            font-weight: bold;
+            text-align: center;
+            z-index: 1000;
+            border-bottom: 1px solid #ccc;
+        }
+        #map {
+            width: 100%;
+            height: calc(100vh - 100px);
+            margin-top: 60px;
+        }
+        #controls {
+            position: absolute;
+            top: 70px;
+            left: 20px;
+            z-index: 1000;
+            background-color: white;
+            padding: 10px;
+            border: 1px solid #ccc;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div id="title">Election Turnout Trends: 2020 vs. 2024</div>
+    <div id="map"></div>
+    <div id="controls">
+        <label><input type="radio" name="voteType" value="Absentee" checked> Absentee</label><br>
+        <label><input type="radio" name="voteType" value="Election Day"> Election Day</label><br>
+        <label><input type="radio" name="voteType" value="Total"> Total</label><br>
+    </div>
+
+    <script>
+        const map = L.map('map').setView([42.3223, -83.1763], 13);
+
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; OpenStreetMap contributors'
+        }).addTo(map);
+
+        let geoLayer;
+        let precinctData = [];
+
+        // Fetch the precinct data JSON
+        fetch('precinct_trends.json')
+            .then(response => response.json())
+            .then(data => {
+                precinctData = data;
+                loadPrecinctData('Absentee'); // Default view
+            });
+
+        function getColorForTrend(diff) {
+            if (diff > 0.1) return 'rgba(0, 128, 0, 0.7)'; // Strong positive trend
+            if (diff > 0.05) return 'rgba(0, 128, 0, 0.5)'; // Moderate positive trend
+            if (diff > 0) return 'rgba(0, 128, 0, 0.3)';   // Slight positive trend
+            if (diff > -0.05) return 'rgba(255, 0, 0, 0.3)'; // Slight negative trend
+            if (diff > -0.1) return 'rgba(255, 0, 0, 0.5)'; // Moderate negative trend
+            return 'rgba(255, 0, 0, 0.7)';                 // Strong negative trend
+        }
+
+        function updatePrecincts(voteType) {
+            if (geoLayer) geoLayer.clearLayers();
+
+            fetch('Modified_Dearborn_Precincts.geojson')
+                .then(response => response.json())
+                .then(geoData => {
+                    geoData.features.forEach(feature => {
+                        const precinctID = feature.properties.Precinct_Long_Name?.trim();
+                        const data = precinctData.find(p => p['Precinct Name'] === precinctID);
+
+                        if (data) {
+                            const turnoutDiff = data[`Turn Out Rate Diff_${voteType}`];
+                            feature.properties.turnoutDiff = turnoutDiff;
+
+                            const popupContent = `
+                                <b>Precinct:</b> ${precinctID}<br>
+                                <b>2020 Voted:</b> ${data[`2020 Voted_${voteType}`]}<br>
+                                <b>2024 Voted:</b> ${data[`2024 Voted_${voteType}`]}<br>
+                                <b>Turnout Diff:</b> ${(turnoutDiff * 100).toFixed(2)}%
+                            `;
+                            feature.properties.popupContent = popupContent;
+                        }
+                    });
+
+                    geoLayer = L.geoJson(geoData, {
+                        style: feature => ({
+                            fillColor: getColorForTrend(feature.properties.turnoutDiff),
+                            weight: 1,
+                            color: '#333',
+                            fillOpacity: 0.7
+                        }),
+                        onEachFeature: (feature, layer) => {
+                            layer.on('click', () => {
+                                layer.bindPopup(feature.properties.popupContent).openPopup();
+                            });
+                        }
+                    }).addTo(map);
+                });
+        }
+
+        function loadPrecinctData(voteType) {
+            updatePrecincts(voteType);
+        }
+
+        // Event listener for vote type selection
+        document.querySelectorAll('input[name="voteType"]').forEach(radio => {
+            radio.addEventListener('change', event => {
+                loadPrecinctData(event.target.value);
+            });
+        });
+    </script>
+</body>
+</html>
